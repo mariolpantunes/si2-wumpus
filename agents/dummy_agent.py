@@ -1,0 +1,46 @@
+import asyncio
+import random
+
+from agents.base_agent import BaseAgent
+
+
+class DummyAgent(BaseAgent):
+    """
+    A purely random agent for the Wumpus World.
+    It ignores all percepts and walks randomly, frequently bumping into walls or dying.
+    """
+
+    def __init__(self, server_uri="ws://localhost:8765"):
+        super().__init__(server_uri)
+        self.visited = set()
+
+    async def deliberate(self):
+        # Track where we have been just to paint the UI blue
+        pos = self.current_state.get("position")
+        if pos:
+            self.visited.add(f"{pos[0]},{pos[1]}")
+
+        # Completely ignore percepts and pick a random direction
+        return random.choice(["N", "S", "E", "W"])
+
+    def reset_memory(self):
+        self.visited.clear()
+
+    async def send_telemetry(self, websocket):
+        """Send basic telemetry so the UI renders the explored path."""
+        import json
+
+        payload = {
+            "action": "telemetry",
+            "data": {
+                "visited": list(self.visited),
+                "percepts": self.current_state.get("percepts", {}),
+                "current_probs": {"N": 0.25, "S": 0.25, "E": 0.25, "W": 0.25},
+            },
+        }
+        await websocket.send(json.dumps(payload))
+
+
+if __name__ == "__main__":
+    agent = DummyAgent()
+    asyncio.run(agent.run())

@@ -1,0 +1,16 @@
+{
+  "width": 7,
+  "height": 7,
+  "type": "wumpus",
+  "teleport": false,
+  "start": [0, 6],
+  "grid": [
+    ["floor", "floor", "floor", "floor", "floor", "floor", "floor"],
+    ["floor", "pit", "floor", "floor", "floor", "pit", "floor"],
+    ["floor", "floor", "pit", "floor", "pit", "floor", "floor"],
+    ["floor", "floor", "floor", "gold", "wumpus", "floor", "floor"],
+    ["floor", "floor", "pit", "floor", "pit", "floor", "floor"],
+    ["floor", "pit", "floor", "floor", "floor", "pit", "floor"],
+    ["floor", "floor", "floor", "floor", "floor", "floor", "floor"]
+  ]
+}

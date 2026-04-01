@@ -1,0 +1,15 @@
+{
+  "width": 6,
+  "height": 6,
+  "type": "wumpus",
+  "teleport": false,
+  "start": [0, 5],
+  "grid": [
+    ["floor", "floor", "floor", "gold", "obstacle", "floor"],
+    ["floor", "obstacle", "obstacle", "obstacle", "obstacle", "floor"],
+    ["floor", "pit", "floor", "floor", "floor", "wumpus"],
+    ["floor", "obstacle", "obstacle", "obstacle", "floor", "floor"],
+    ["floor", "floor", "pit", "floor", "floor", "floor"],
+    ["floor", "obstacle", "floor", "floor", "pit", "floor"]
+  ]
+}

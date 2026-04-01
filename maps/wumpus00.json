@@ -1,0 +1,13 @@
+{
+  "width": 4,
+  "height": 4,
+  "type": "wumpus",
+  "teleport": false,
+  "start": [0, 3],
+  "grid": [
+    ["floor", "pit", "floor", "pit"],
+    ["wumpus", "gold", "pit", "floor"],
+    ["floor", "floor", "floor", "floor"],
+    ["floor", "floor", "pit", "floor"]
+  ]
+}
