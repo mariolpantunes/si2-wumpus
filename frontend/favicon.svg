@@ -1,31 +1,55 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
-
   <defs>
-    <radialGradient id="playerGrad" cx="40%" cy="40%" r="60%">
+    <radialGradient id="pitGrad" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#5E81AC" />
+      <stop offset="100%" stop-color="#3B4252" />
+    </radialGradient>
+    
+    <radialGradient id="wumpusGrad" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#A3BE8C" />
+      <stop offset="100%" stop-color="#434C5E" />
+    </radialGradient>
+    
+    <radialGradient id="goldGrad" cx="30%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#EBCB8B" />
+      <stop offset="100%" stop-color="#D08770" />
+    </radialGradient>
+    
+    <radialGradient id="playerGrad" cx="30%" cy="30%" r="70%">
       <stop offset="0%" stop-color="#88C0D0" />
       <stop offset="100%" stop-color="#5E81AC" />
     </radialGradient>
   </defs>
 
-  <rect x="0" y="0" width="10" height="10" fill="#4C566A" />
-  <rect x="10" y="0" width="10" height="10" fill="#4C566A" />
-  <rect x="20" y="0" width="10" height="10" fill="#A3BE8C" />
-  <rect x="30" y="0" width="10" height="10" fill="#4C566A" />
+  <rect x="0" y="0" width="40" height="40" fill="#4C566A" rx="2" />
 
-  <rect x="0" y="10" width="10" height="10" fill="#4C566A" />
-  <rect x="10" y="10" width="10" height="10" fill="#D8DEE9" />
-  <rect x="20" y="10" width="10" height="10" fill="#D8DEE9" />
-  <rect x="30" y="10" width="10" height="10" fill="#4C566A" />
+  <rect x="1" y="1" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="11" y="1" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="21" y="1" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="31" y="1" width="8" height="8" fill="#D8DEE9" rx="1" />
 
-  <rect x="0" y="20" width="10" height="10" fill="#4C566A" />
-  <rect x="10" y="20" width="10" height="10" fill="#D8DEE9" />
-  <rect x="20" y="20" width="10" height="10" fill="#4C566A" />
-  <rect x="30" y="20" width="10" height="10" fill="#4C566A" />
+  <rect x="1" y="11" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="11" y="11" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="21" y="11" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="31" y="11" width="8" height="8" fill="#D8DEE9" rx="1" />
 
-  <rect x="0" y="30" width="10" height="10" fill="#4C566A" />
-  <rect x="10" y="30" width="10" height="10" fill="#D8DEE9" />
-  <rect x="20" y="30" width="10" height="10" fill="#D8DEE9" />
-  <rect x="30" y="30" width="10" height="10" fill="#D8DEE9" /> 
-  <circle cx="35" cy="35" r="4" fill="url(#playerGrad)" />
+  <rect x="1" y="21" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="11" y="21" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="21" y="21" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="31" y="21" width="8" height="8" fill="#D8DEE9" rx="1" />
 
+  <rect x="1" y="31" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="11" y="31" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="21" y="31" width="8" height="8" fill="#D8DEE9" rx="1" />
+  <rect x="31" y="31" width="8" height="8" fill="#D8DEE9" rx="1" />
+
+  <circle cx="15" cy="5" r="3.5" fill="url(#pitGrad)" />
+  <circle cx="35" cy="5" r="3.5" fill="url(#pitGrad)" />
+
+  <circle cx="5" cy="15" r="3.5" fill="url(#wumpusGrad)" />
+  <circle cx="15" cy="15" r="3.5" fill="url(#goldGrad)" />
+  <circle cx="25" cy="15" r="3.5" fill="url(#pitGrad)" />
+
+  <circle cx="5" cy="35" r="3.5" fill="url(#playerGrad)" />
+  <circle cx="25" cy="35" r="3.5" fill="url(#pitGrad)" />
 </svg>

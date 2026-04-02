@@ -1,13 +1,15 @@
 import asyncio
 import json
+import os
 import sys
 import termios
 import tty
+from typing import Any, Dict, Optional, Set, Tuple, Union
 
 from agents.base_agent import BaseAgent
 
 
-def getch():
+def getch() -> str:
     """Reads a single character from the standard input (Linux/macOS)."""
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
@@ -25,27 +27,47 @@ class ManualAgent(BaseAgent):
     Adapted for Wumpus World partial observability.
     """
 
-    def __init__(self, server_uri="ws://localhost:8765"):
+    def __init__(self, server_uri: Optional[str] = None) -> None:
+        """
+        Initializes the manual agent.
+
+        Args:
+            server_uri: The URI of the simulation server.
+        """
+        if server_uri is None:
+            server_uri = os.environ.get("WUMPUS_SERVER", "ws://localhost:8765")
         super().__init__(server_uri)
-        self.key_mapping = {"w": "N", "s": "S", "d": "E", "a": "W"}
-        self.visited = set()
+        self.key_mapping: Dict[str, str] = {"w": "N", "s": "S", "d": "E", "a": "W"}
+        self.shoot_mapping: Dict[str, str] = {"i": "N", "k": "S", "l": "E", "j": "W"}
+        self.visited: Set[str] = set()
 
-    async def deliberate(self):
-        """Prompts the user for a valid WASD input."""
+    def update_memory(self) -> None:
+        """Tracks the current position to update the UI."""
+        if self.current_state:
+            pos = self.current_state.get("position")
+            if pos:
+                self.visited.add(f"{pos[0]},{pos[1]}")
 
-        if self.current_state.get("objective_reached"):
+    async def deliberate(self) -> Optional[Union[str, Tuple[str, str]]]:
+        """Prompts the user for a valid input."""
+        if not self.current_state:
             return None
 
         pos = self.current_state.get("position")
-        self.visited.add(f"{pos[0]},{pos[1]}")
-
         percepts = self.current_state.get("percepts", {})
         active_percepts = [k.capitalize() for k, v in percepts.items() if v]
         percept_str = ", ".join(active_percepts) if active_percepts else "None"
 
-        print(f"\n--- Agent at {pos} ---")
+        score = self.current_state.get("score", 0)
+        arrows = self.current_state.get("arrows", 0)
+
+        print(f"\n--- Agent at {pos} | Score: {score} | Arrows: {arrows} ---")
         print(f"Percepts: [{percept_str}]")
-        print("Press W/A/S/D to move (or Ctrl+C to quit)... ", end="", flush=True)
+
+        if self.current_state.get("objective_reached"):
+            return None
+
+        print("Move: W/A/S/D | Shoot: I/J/K/L | Quit: Ctrl+C")
 
         while True:
             user_input = await asyncio.to_thread(getch)
@@ -56,19 +78,26 @@ class ManualAgent(BaseAgent):
 
             if user_input in self.key_mapping:
                 action = self.key_mapping[user_input]
-                print(action)  # Echo the choice
+                print(f"Moving {action}")
                 return action
 
-    def reset_memory(self):
+            if user_input in self.shoot_mapping:
+                direction = self.shoot_mapping[user_input]
+                print(f"Shooting {direction}")
+                return ("shoot", direction)
+
+    def reset_memory(self) -> None:
+        """Clears the set of visited tiles."""
         self.visited.clear()
 
-    async def send_telemetry(self, websocket):
+    async def send_telemetry(self, websocket: Any) -> None:
         """Pass the current percepts to the UI to update the tags panel."""
+        percepts = self.current_state.get("percepts", {}) if self.current_state else {}
         payload = {
             "action": "telemetry",
             "data": {
                 "visited": list(self.visited),
-                "percepts": self.current_state.get("percepts", {}),
+                "percepts": percepts,
                 "current_probs": {"N": 0.0, "S": 0.0, "E": 0.0, "W": 0.0},
             },
         }

@@ -1,3 +1,5 @@
+console.log("script.js loading...");
+
 function hexToRgb(hex) {
   const bigint = parseInt(hex.replace("#", ""), 16);
   return {
@@ -22,11 +24,18 @@ function interpolateColor(baseHex, intensity, maxIntensity = 10) {
 
 class App {
   constructor() {
-    const serverHost = window.location.hostname;
-    this.ws = new WebSocket(`ws://${serverHost}:8765`);
+    console.log("App constructor initializing...");
+    const serverHost = window.location.hostname || "localhost";
+    this.serverUrl = `ws://${serverHost}:8765`;
+    this.ws = null;
+    this.reconnectAttempts = 0;
+
     this.canvas = document.getElementById("sim-canvas");
     this.ctx = this.canvas.getContext("2d");
     this.cellSize = 40;
+
+    this.agentCanvas = document.getElementById("agent-canvas");
+    this.agentCtx = this.agentCanvas.getContext("2d");
 
     this.mode = "idle";
     this.mapData = null;
@@ -35,53 +44,110 @@ class App {
 
     this.setupWebsocket();
     this.setupCanvasEvents();
-    this.agentCanvas = document.getElementById("agent-canvas");
-    this.agentCtx = this.agentCanvas.getContext("2d");
+    console.log("App initialized.");
   }
 
   setupWebsocket() {
+    console.log("Connecting to " + this.serverUrl);
+    this.ws = new WebSocket(this.serverUrl);
+
     this.ws.onopen = () => {
+      console.log("Connected to backend");
+      this.reconnectAttempts = 0;
       this.ws.send(JSON.stringify({ client: "frontend" }));
+      document.getElementById("agent-status").innerText = "Connected";
     };
 
     this.ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === "map_list") {
         const select = document.getElementById("map-select");
-        select.innerHTML = "";
-        data.maps.forEach((m) => {
-          const opt = document.createElement("option");
-          opt.value = m;
-          opt.innerText = m;
-          select.appendChild(opt);
-        });
+        if (select) {
+            select.innerHTML = "";
+            data.maps.forEach((m) => {
+              const opt = document.createElement("option");
+              opt.value = m;
+              opt.innerText = m;
+              select.appendChild(opt);
+            });
+        }
       } else if (data.type === "update") {
         this.mapData = data.map;
         this.simState = data.state;
-        document.getElementById("sim-controls").classList.remove("hidden");
-        document.getElementById("agent-status").innerText = data.agent_connected
-          ? "Agent: Connected"
-          : "Agent: Waiting...";
+
+        // Clear agent UI if this looks like a fresh reset (score 0, 1 visit)
+        if (this.simState && this.simState.score === 0 && Object.keys(this.simState.visits || {}).length <= 1) {
+            this.agentCtx.clearRect(0, 0, this.agentCanvas.width, this.agentCanvas.height);
+            const container = document.getElementById("percept-tags");
+            if (container) container.innerHTML = '<span class="percept-tag neutral">NONE</span>';
+        }
+
+        const controls = document.getElementById("sim-controls");
+        if (controls) controls.classList.remove("hidden");
+        
+        const status = document.getElementById("agent-status");
+        if (status) {
+            status.innerText = data.agent_connected ? "Agent: Connected" : "Agent: Waiting...";
+        }
+
+        if (!data.agent_connected) {
+            const brainPanel = document.getElementById("agent-brain-panel");
+            if (brainPanel) brainPanel.style.display = "none";
+            this.agentCtx.clearRect(0, 0, this.agentCanvas.width, this.agentCanvas.height);
+        }
+        
+        if (this.simState) {
+            const scoreVal = document.getElementById("score-val");
+            const arrowsVal = document.getElementById("arrows-val");
+            if (scoreVal) scoreVal.innerText = `Score: ${this.simState.score}`;
+            if (arrowsVal) arrowsVal.innerText = `Arrows: ${this.simState.arrows}`;
+        }
+
         this.resizeCanvas();
         this.draw();
       } else if (data.type === "agent_telemetry") {
-        document.getElementById("agent-brain-panel").style.display = "flex";
+        const brainPanel = document.getElementById("agent-brain-panel");
+        if (brainPanel) brainPanel.style.display = "flex";
         this.updateAgentBrainUI(data.data);
       }
     };
+
+    this.ws.onclose = () => {
+      console.log("Websocket connection closed");
+      const status = document.getElementById("agent-status");
+      if (status) status.innerText = "Disconnected. Reconnecting...";
+      const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+      this.reconnectAttempts++;
+      setTimeout(() => this.setupWebsocket(), delay);
+    };
+
+    this.ws.onerror = (err) => {
+      console.error("Websocket error:", err);
+      this.ws.close();
+    };
+  }
+
+  resizeCanvas() {
+    if (!this.mapData) return;
+    const w = this.mapData.width * this.cellSize;
+    const h = this.mapData.height * this.cellSize;
+    
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+        this.canvas.width = w;
+        this.canvas.height = h;
+        this.agentCanvas.width = w;
+        this.agentCanvas.height = h;
+        
+        this.agentCtx.clearRect(0, 0, w, h);
+        const tags = document.getElementById("percept-tags");
+        if (tags) tags.innerHTML = '<span class="percept-tag neutral">NONE</span>';
+    }
   }
 
   updateAgentBrainUI(telemetry) {
     if (!this.mapData) return;
 
-    this.agentCanvas.width = this.canvas.width;
-    this.agentCanvas.height = this.canvas.height;
-    this.agentCtx.clearRect(
-      0,
-      0,
-      this.agentCanvas.width,
-      this.agentCanvas.height,
-    );
+    this.agentCtx.clearRect(0, 0, this.agentCanvas.width, this.agentCanvas.height);
 
     const visited = new Set(telemetry.visited || []);
     for (let y = 0; y < this.mapData.height; y++) {
@@ -114,68 +180,64 @@ class App {
       this.agentCtx.fill();
     }
 
-    // Update Percepts UI
     if (telemetry.percepts) {
       const container = document.getElementById("percept-tags");
-      container.innerHTML = "";
-      let hasPercepts = false;
+      if (container) {
+          container.innerHTML = "";
+          let hasPercepts = false;
 
-      for (const [key, value] of Object.entries(telemetry.percepts)) {
-        if (value) {
-          hasPercepts = true;
-          const tag = document.createElement("span");
-          tag.className = "percept-tag active";
-          tag.innerText = key.toUpperCase();
-          container.appendChild(tag);
-        }
-      }
-      if (!hasPercepts) {
-        container.innerHTML = '<span class="percept-tag neutral">NONE</span>';
+          for (const [key, value] of Object.entries(telemetry.percepts)) {
+            if (value) {
+              hasPercepts = true;
+              const tag = document.createElement("span");
+              tag.className = "percept-tag active";
+              tag.innerText = key.toUpperCase();
+              container.appendChild(tag);
+            }
+          }
+          if (!hasPercepts) {
+            container.innerHTML = '<span class="percept-tag neutral">NONE</span>';
+          }
       }
     }
 
-    // Update probability bars
     const probs = telemetry.current_probs || { N: 0, S: 0, E: 0, W: 0 };
     ["N", "S", "E", "W"].forEach((dir) => {
       const p = probs[dir] || 0;
       const pct = Math.round(p * 100);
-      document.getElementById(`prob-${dir}`).style.width = `${pct}%`;
-      document.getElementById(`txt-${dir}`).innerText = `${pct}%`;
-
       const bar = document.getElementById(`prob-${dir}`);
-      if (p === 0) bar.style.backgroundColor = "var(--nord11)";
-      else if (p > 0.4) bar.style.backgroundColor = "var(--nord14)";
-      else bar.style.backgroundColor = "var(--nord13)";
+      const txt = document.getElementById(`txt-${dir}`);
+      if (bar) {
+          bar.style.width = `${pct}%`;
+          if (p === 0) bar.style.backgroundColor = "var(--nord11)";
+          else if (p > 0.4) bar.style.backgroundColor = "var(--nord14)";
+          else bar.style.backgroundColor = "var(--nord13)";
+      }
+      if (txt) txt.innerText = `${pct}%`;
     });
   }
 
   showMenu(menuId) {
-    document
-      .querySelectorAll(".panel")
-      .forEach((p) => p.classList.add("hidden"));
-    document.getElementById(menuId).classList.remove("hidden");
+    document.querySelectorAll(".panel").forEach((p) => p.classList.add("hidden"));
+    const menu = document.getElementById(menuId);
+    if (menu) menu.classList.remove("hidden");
     this.mode = menuId === "edit-menu" ? "edit" : "idle";
     if (menuId === "main-menu") this.mapData = null;
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
   loadMap() {
-    const filename = document.getElementById("map-select").value;
+    const select = document.getElementById("map-select");
+    const filename = select ? select.value : null;
     if (filename) {
       this.mode = "run";
       this.ws.send(JSON.stringify({ action: "load_map", filename }));
     }
   }
 
-  startSimulation() {
-    this.ws.send(JSON.stringify({ action: "start_sim" }));
-  }
-  stopSimulation() {
-    this.ws.send(JSON.stringify({ action: "stop_sim" }));
-  }
-  resetSimulation() {
-    this.ws.send(JSON.stringify({ action: "reset_sim" }));
-  }
+  startSimulation() { this.ws.send(JSON.stringify({ action: "start_sim" })); }
+  stopSimulation() { this.ws.send(JSON.stringify({ action: "stop_sim" })); }
+  resetSimulation() { this.ws.send(JSON.stringify({ action: "reset_sim" })); }
 
   createNewMap() {
     const w = parseInt(document.getElementById("new-map-w").value);
@@ -183,45 +245,25 @@ class App {
     const type = document.getElementById("new-map-type").value;
     const isTeleport = document.getElementById("new-map-teleport").checked;
 
-    const grid = Array(h)
-      .fill()
-      .map(() => Array(w).fill("floor"));
+    const grid = Array(h).fill().map(() => Array(w).fill("floor"));
     this.mapData = {
-      width: w,
-      height: h,
-      type: type,
-      teleport: isTeleport,
-      grid: grid,
-      start: [0, 0],
-      target: [w - 1, h - 1],
+      width: w, height: h, type: type, teleport: isTeleport,
+      grid: grid, start: [0, 0], target: [w - 1, h - 1],
     };
     this.simState = null;
-
-    document.getElementById("editor-tools").classList.remove("hidden");
+    const tools = document.getElementById("editor-tools");
+    if (tools) tools.classList.remove("hidden");
     this.resizeCanvas();
     this.draw();
   }
 
-  setEditTool(tool) {
-    this.editTool = tool;
-  }
+  setEditTool(tool) { this.editTool = tool; }
 
   saveMap() {
-    const name = document.getElementById("new-map-name").value || "new_map";
-    this.ws.send(
-      JSON.stringify({
-        action: "save_map",
-        filename: name,
-        map_data: this.mapData,
-      }),
-    );
+    const nameInput = document.getElementById("new-map-name");
+    const name = (nameInput && nameInput.value) || "new_map";
+    this.ws.send(JSON.stringify({ action: "save_map", filename: name, map_data: this.mapData }));
     alert("Map saved!");
-  }
-
-  resizeCanvas() {
-    if (!this.mapData) return;
-    this.canvas.width = this.mapData.width * this.cellSize;
-    this.canvas.height = this.mapData.height * this.cellSize;
   }
 
   setupCanvasEvents() {
@@ -231,21 +273,11 @@ class App {
       const x = Math.floor((e.clientX - rect.left) / this.cellSize);
       const y = Math.floor((e.clientY - rect.top) / this.cellSize);
 
-      if (
-        x >= 0 &&
-        x < this.mapData.width &&
-        y >= 0 &&
-        y < this.mapData.height
-      ) {
-        if (
-          ["floor", "obstacle", "pit", "wumpus", "gold"].includes(this.editTool)
-        ) {
+      if (x >= 0 && x < this.mapData.width && y >= 0 && y < this.mapData.height) {
+        if (["floor", "obstacle", "pit", "wumpus", "gold"].includes(this.editTool)) {
           this.mapData.grid[y][x] = this.editTool;
         } else if (this.editTool === "start") {
           this.mapData.start = [x, y];
-          this.mapData.grid[y][x] = "floor";
-        } else if (this.editTool === "target") {
-          this.mapData.target = [x, y];
           this.mapData.grid[y][x] = "floor";
         }
         this.draw();
@@ -255,7 +287,6 @@ class App {
 
   draw() {
     if (!this.mapData) return;
-
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
     for (let y = 0; y < this.mapData.height; y++) {
@@ -265,11 +296,8 @@ class App {
         const cy = y * this.cellSize;
         const key = `${x},${y}`;
 
-        // Treat Floor, Pit, Wumpus, and Gold all as having a basic floor background
-        if (["floor", "pit", "wumpus", "gold"].includes(cell)) {
-          let color = "#D8DEE9"; // Light Nord floor color
-
-          // Apply heatmap over the floor
+        if (["floor", "pit", "wumpus", "gold", "arrow"].includes(cell)) {
+          let color = "#D8DEE9";
           if (this.simState && this.simState.visits[key]) {
             color = interpolateColor(color, this.simState.visits[key], 15);
           }
@@ -278,33 +306,23 @@ class App {
           this.ctx.strokeStyle = "#E5E9F0";
           this.ctx.strokeRect(cx, cy, this.cellSize, this.cellSize);
 
-          // Teleport portal overlay
-          const isEdge =
-            x === 0 ||
-            x === this.mapData.width - 1 ||
-            y === 0 ||
-            y === this.mapData.height - 1;
-          if (this.mapData.teleport && isEdge) {
+          if (this.mapData.teleport && (x === 0 || x === this.mapData.width - 1 || y === 0 || y === this.mapData.height - 1)) {
             this.ctx.beginPath();
             this.ctx.moveTo(cx + this.cellSize / 2, cy + 10);
             this.ctx.lineTo(cx + this.cellSize - 10, cy + this.cellSize / 2);
             this.ctx.lineTo(cx + this.cellSize / 2, cy + this.cellSize - 10);
             this.ctx.lineTo(cx + 10, cy + this.cellSize / 2);
             this.ctx.closePath();
-
             this.ctx.strokeStyle = "rgba(180, 142, 173, 0.9)";
             this.ctx.lineWidth = 2;
             this.ctx.stroke();
             this.ctx.lineWidth = 1;
           }
 
-          // Draw the specific Entity Emojis ON TOP of the light floor
-          if (cell !== "floor") {
+          if (cell !== "floor" || cell === "arrow") {
             this.ctx.font = "24px sans-serif";
             this.ctx.textAlign = "center";
             this.ctx.textBaseline = "middle";
-
-            // Add a slight drop shadow so the emoji pops off the light floor
             this.ctx.shadowColor = "rgba(0,0,0,0.4)";
             this.ctx.shadowBlur = 4;
             this.ctx.shadowOffsetX = 2;
@@ -312,16 +330,14 @@ class App {
 
             let emoji = "";
             if (cell === "pit") emoji = "🕳️";
-            else if (cell === "wumpus") emoji = "🐲";
+            else if (cell === "wumpus") {
+                if (this.simState && !this.simState.wumpus_alive) emoji = "";
+                else emoji = "🐲";
+            }
             else if (cell === "gold") emoji = "💰";
+            else if (cell === "arrow") emoji = "🏹";
 
-            this.ctx.fillText(
-              emoji,
-              cx + this.cellSize / 2,
-              cy + this.cellSize / 2 + 2,
-            );
-
-            // Reset shadow for the next tiles
+            this.ctx.fillText(emoji, cx + this.cellSize / 2, cy + this.cellSize / 2 + 2);
             this.ctx.shadowColor = "transparent";
           }
         } else if (cell === "obstacle") {
@@ -329,62 +345,53 @@ class App {
           if (this.simState && this.simState.hits[key]) {
             color = interpolateColor(color, this.simState.hits[key], 5);
           }
-
           this.ctx.fillStyle = color;
           this.ctx.fillRect(cx, cy, this.cellSize, this.cellSize);
-
-          this.ctx.fillStyle = "rgba(255,255,255,0.1)";
-          this.ctx.beginPath();
-          this.ctx.moveTo(cx, cy);
-          this.ctx.lineTo(cx + this.cellSize, cy);
-          this.ctx.lineTo(cx + this.cellSize - 5, cy + 5);
-          this.ctx.lineTo(cx + 5, cy + 5);
-          this.ctx.fill();
-
-          this.ctx.fillStyle = "rgba(0,0,0,0.3)";
-          this.ctx.beginPath();
-          this.ctx.moveTo(cx + this.cellSize, cy);
-          this.ctx.lineTo(cx + this.cellSize, cy + this.cellSize);
-          this.ctx.lineTo(cx + this.cellSize - 5, cy + this.cellSize - 5);
-          this.ctx.lineTo(cx + this.cellSize - 5, cy + 5);
-          this.ctx.fill();
         }
 
-        // Draw the starting tile highlight
-        if (
-          this.mapData.start &&
-          x === this.mapData.start[0] &&
-          y === this.mapData.start[1]
-        ) {
+        if (this.mapData.start && x === this.mapData.start[0] && y === this.mapData.start[1]) {
           this.ctx.fillStyle = "rgba(235, 203, 139, 0.5)";
           this.ctx.fillRect(cx, cy, this.cellSize, this.cellSize);
         }
       }
     }
 
-    // Draw the Agent
+    if (this.simState && this.simState.last_arrow_path) {
+      this.ctx.strokeStyle = "rgba(235, 203, 139, 0.8)";
+      this.ctx.setLineDash([5, 5]);
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      const [ax, ay] = this.simState.agent_pos;
+      this.ctx.moveTo(ax * this.cellSize + this.cellSize/2, ay * this.cellSize + this.cellSize/2);
+      this.simState.last_arrow_path.forEach(pos => {
+        this.ctx.lineTo(pos[0] * this.cellSize + this.cellSize/2, pos[1] * this.cellSize + this.cellSize/2);
+      });
+      this.ctx.stroke();
+      this.ctx.setLineDash([]);
+      this.ctx.lineWidth = 1;
+      
+      if (this.simState.last_arrow_path.length > 0) {
+        const last = this.simState.last_arrow_path[this.simState.last_arrow_path.length - 1];
+        this.ctx.fillStyle = "#EBCB8B";
+        this.ctx.font = "20px sans-serif";
+        this.ctx.textAlign = "center";
+        this.ctx.textBaseline = "middle";
+        this.ctx.fillText("🏹", last[0] * this.cellSize + this.cellSize/2, last[1] * this.cellSize + this.cellSize/2);
+      }
+    }
+
     if (this.simState && this.simState.agent_pos) {
       const [ax, ay] = this.simState.agent_pos;
       const centerX = ax * this.cellSize + this.cellSize / 2;
       const centerY = ay * this.cellSize + this.cellSize / 2;
       const radius = this.cellSize / 2 - 4;
-
-      const gradient = this.ctx.createRadialGradient(
-        centerX - radius / 3,
-        centerY - radius / 3,
-        radius / 5,
-        centerX,
-        centerY,
-        radius,
-      );
+      const gradient = this.ctx.createRadialGradient(centerX - radius / 3, centerY - radius / 3, radius / 5, centerX, centerY, radius);
       gradient.addColorStop(0, "#88C0D0");
       gradient.addColorStop(1, "#5E81AC");
-
       this.ctx.beginPath();
       this.ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
       this.ctx.fillStyle = gradient;
       this.ctx.fill();
-
       this.ctx.shadowColor = "rgba(0,0,0,0.5)";
       this.ctx.shadowBlur = 5;
       this.ctx.shadowOffsetX = 2;
@@ -396,3 +403,4 @@ class App {
 }
 
 const app = new App();
+console.log("script.js execution complete.");

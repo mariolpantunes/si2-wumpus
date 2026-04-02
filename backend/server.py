@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+from typing import Any, Dict, Optional, Tuple
 
 # Configure standard logging
 logging.basicConfig(
@@ -10,26 +11,84 @@ logging.basicConfig(
 
 
 class SimulationServer:
-    def __init__(self):
-        self.frontend_ws = None
-        self.agent_ws = None
-        self.maps_dir = "maps"
-        self.current_map = None
-        self.sim_state = {}
-        self.running = False
+    """
+    Simulation server for the Wumpus World environment.
+    Handles map loading, agent actions, and frontend synchronization.
+    """
+
+    def __init__(self) -> None:
+        """Initializes the simulation server and default state."""
+        self.frontend_ws: Any = None
+        self.agent_ws: Any = None
+        self.maps_dir: str = "maps"
+        self.current_map: Optional[Dict[str, Any]] = None
+        self.running: bool = False
+        self.sim_state: Dict[str, Any] = {}
+
+        # Initialize default state
+        self._initialize_empty_state()
 
         if not os.path.exists(self.maps_dir):
             os.makedirs(self.maps_dir)
             logging.info(f"Created maps directory at: {os.path.abspath(self.maps_dir)}")
 
-    async def start(self, host="0.0.0.0", port=8765):
+    def _initialize_empty_state(self) -> None:
+        """Sets the simulation state to a clean baseline."""
+        self.sim_state = {
+            "agent_pos": [0, 0],
+            "visits": {},
+            "hits": {},
+            "bumped": False,
+            "scream": False,
+            "wumpus_alive": True,
+            "arrows": 1,
+            "score": 0,
+            "game_over": False,
+            "last_arrow_path": None,
+        }
+
+    def _wrap_coords(self, x: int, y: int) -> Tuple[int, int]:
+        """
+        Applies toroidal wrapping if enabled for the current map.
+
+        Args:
+            x: The x-coordinate.
+            y: The y-coordinate.
+
+        Returns:
+            A tuple of (wrapped_x, wrapped_y).
+        """
+        if not self.current_map:
+            return x, y
+
+        width = self.current_map["width"]
+        height = self.current_map["height"]
+
+        if self.current_map.get("teleport", False):
+            return x % width, y % height
+        return x, y
+
+    async def start(self, host: str = "0.0.0.0", port: int = 8765) -> None:
+        """
+        Starts the websocket server.
+
+        Args:
+            host: The host to bind to.
+            port: The port to listen on.
+        """
         import websockets
 
         logging.info(f"Starting websocket server on ws://{host}:{port}")
         async with websockets.serve(self.handle_client, host, port):
             await asyncio.Future()
 
-    async def handle_client(self, websocket):
+    async def handle_client(self, websocket: Any) -> None:
+        """
+        Handles an incoming websocket connection.
+
+        Args:
+            websocket: The websocket connection.
+        """
         client_type = "Unknown"
         try:
             init_msg = await websocket.recv()
@@ -37,34 +96,58 @@ class SimulationServer:
             client_type = data.get("client", "Unknown")
 
             if client_type == "frontend":
-                logging.info("Frontend connected.")
-                self.frontend_ws = websocket
-                await self.send_map_list()
-                await self.frontend_loop(websocket)
+                await self._setup_frontend(websocket)
             elif client_type == "agent":
-                logging.info("Agent connected.")
-                self.agent_ws = websocket
-                if self.running:
-                    await self.send_agent_state()
-                await self.agent_loop(websocket)
+                await self._setup_agent(websocket)
             else:
                 logging.warning(
                     f"Unknown client type attempted connection: {client_type}"
                 )
 
-        except websockets.exceptions.ConnectionClosed:
-            logging.info(f"{client_type} disconnected cleanly.")
         except Exception as e:
             logging.error(f"Error handling client {client_type}: {e}")
         finally:
-            if websocket == self.frontend_ws:
-                self.frontend_ws = None
-                logging.info("Frontend session cleared.")
-            elif websocket == self.agent_ws:
-                self.agent_ws = None
-                logging.info("Agent session cleared.")
+            await self._cleanup_client(websocket)
 
-    async def frontend_loop(self, websocket):
+    async def _setup_frontend(self, websocket: Any) -> None:
+        """Sets up a new frontend connection."""
+        if self.frontend_ws:
+            logging.info("Closing previous frontend connection.")
+            await self.frontend_ws.close()
+
+        self.frontend_ws = websocket
+        logging.info("Frontend connected.")
+
+        self.reset_sim()
+        if self.agent_ws:
+            await self.agent_ws.send(json.dumps({"type": "reset"}))
+
+        await self.send_map_list()
+        await self.update_frontend()
+        await self.frontend_loop(websocket)
+
+    async def _setup_agent(self, websocket: Any) -> None:
+        """Sets up a new agent connection."""
+        if self.agent_ws:
+            logging.info("Closing previous agent connection.")
+            await self.agent_ws.close()
+
+        self.agent_ws = websocket
+        logging.info("Agent connected.")
+        await self.send_agent_state()
+        await self.agent_loop(websocket)
+
+    async def _cleanup_client(self, websocket: Any) -> None:
+        """Cleans up a client connection."""
+        if websocket == self.frontend_ws:
+            self.frontend_ws = None
+            logging.info("Frontend session cleared.")
+        elif websocket == self.agent_ws:
+            self.agent_ws = None
+            logging.info("Agent session cleared.")
+
+    async def frontend_loop(self, websocket: Any) -> None:
+        """Main loop for frontend communication."""
         async for message in websocket:
             try:
                 data = json.loads(message)
@@ -72,223 +155,325 @@ class SimulationServer:
 
                 if action == "load_map":
                     self.load_map(data.get("filename"))
-                    await self.update_frontend()
-                    if self.agent_ws:
-                        await self.agent_ws.send(json.dumps({"type": "reset"}))
-                        await self.send_agent_state()
                 elif action == "save_map":
                     self.save_map(data.get("filename"), data.get("map_data"))
                     await self.send_map_list()
                 elif action == "start_sim":
-                    self.running = True
-                    logging.info("Simulation started via frontend.")
-                    await self.update_frontend()
-                    if self.agent_ws:
-                        await self.send_agent_state()
+                    self.running = True if self.current_map else False
                 elif action == "stop_sim":
                     self.running = False
-                    logging.info("Simulation stopped via frontend.")
-                    await self.update_frontend()
                 elif action == "reset_sim":
                     self.reset_sim()
-                    await self.update_frontend()
                     if self.agent_ws:
                         await self.agent_ws.send(json.dumps({"type": "reset"}))
-                        await self.send_agent_state()
+
+                await self.update_frontend()
+                if self.agent_ws:
+                    await self.send_agent_state()
             except Exception as e:
                 logging.error(f"Error processing frontend message: {e}")
 
-    async def agent_loop(self, websocket):
+    async def agent_loop(self, websocket: Any) -> None:
+        """Main loop for agent communication."""
         async for message in websocket:
-            if not self.running or not self.current_map:
-                continue
             try:
                 data = json.loads(message)
-                if data.get("action") == "move":
-                    direction = data.get("direction")
-                    self.process_move(direction)
-                    self.check_objective()
-                    await self.update_frontend()
-                    await self.send_agent_state()
-                elif data.get("action") == "telemetry":
+                action = data.get("action")
+
+                if action == "telemetry":
                     if self.frontend_ws:
                         await self.frontend_ws.send(
                             json.dumps(
-                                {"type": "agent_telemetry", "data": data.get("data")}
+                                {
+                                    "type": "agent_telemetry",
+                                    "data": data.get("data"),
+                                }
                             )
                         )
+                    continue
+
+                # Process physical actions only if game is active
+                if (
+                    self.current_map
+                    and self.running
+                    and not self.sim_state.get("game_over")
+                ):
+                    self.sim_state["scream"] = False
+                    if action == "move":
+                        self.process_move(data.get("direction"))
+                        self.sim_state["score"] -= 1
+                        self.check_objective()
+                    elif action == "shoot":
+                        if self.sim_state["arrows"] > 0:
+                            self.process_shoot(data.get("direction"))
+                            self.sim_state["score"] -= 10
+                        else:
+                            self.sim_state["last_arrow_path"] = None
+                            logging.warning("Agent tried to shoot with no arrows.")
+
+                await self.update_frontend()
+                await self.send_agent_state()
             except Exception as e:
                 logging.error(f"Error processing agent message: {e}")
 
-    def process_move(self, direction):
+    def process_move(self, direction: str) -> None:
+        """Processes an agent move action."""
+        self.sim_state["last_arrow_path"] = None
         x, y = self.sim_state["agent_pos"]
-        nx, ny = x, y
 
-        if direction == "N":
-            ny -= 1
-        elif direction == "S":
-            ny += 1
-        elif direction == "E":
-            nx += 1
-        elif direction == "W":
-            nx -= 1
+        dx, dy = {"N": (0, -1), "S": (0, 1), "E": (1, 0), "W": (-1, 0)}.get(
+            direction, (0, 0)
+        )
+        nx, ny = self._wrap_coords(x + dx, y + dy)
 
-        width = self.current_map["width"]
-        height = self.current_map["height"]
-        is_teleport = self.current_map.get("teleport", False)
+        if not self.current_map:
+            return
 
-        # Apply Toroidal space if teleport is enabled
-        if is_teleport:
-            nx = nx % width
-            ny = ny % height
-
-        # Reset bump percept flag before checking the new position
+        width, height = self.current_map["width"], self.current_map["height"]
         self.sim_state["bumped"] = False
 
         if 0 <= nx < width and 0 <= ny < height:
-            cell = self.current_map["grid"][ny][nx]
-            if cell == "obstacle":
+            if self.current_map["grid"][ny][nx] == "obstacle":
                 key = f"{nx},{ny}"
                 self.sim_state["hits"][key] = self.sim_state["hits"].get(key, 0) + 1
                 self.sim_state["bumped"] = True
-                logging.debug(f"Agent hit obstacle at {nx},{ny}")
             else:
                 self.sim_state["agent_pos"] = [nx, ny]
+
+                # Arrow pickup logic
+                if self.current_map["grid"][ny][nx] == "arrow":
+                    self.sim_state["arrows"] += 1
+                    self.current_map["grid"][ny][nx] = "floor"
+                    logging.info("Agent picked up an arrow!")
+
                 key = f"{nx},{ny}"
                 self.sim_state["visits"][key] = self.sim_state["visits"].get(key, 0) + 1
-                logging.debug(f"Agent moved to {nx},{ny}")
         else:
-            self.sim_state["bumped"] = True  # Hit standard map edge
+            self.sim_state["bumped"] = True
 
-    def get_percepts(self):
-        """Calculates Wumpus World percepts based on the agent's current position."""
+    def process_shoot(self, direction: str) -> None:
+        """Processes an agent shoot action."""
+        if not self.current_map:
+            return
+
+        self.sim_state["arrows"] -= 1
         x, y = self.sim_state["agent_pos"]
-        width = self.current_map["width"]
-        height = self.current_map["height"]
-        grid = self.current_map["grid"]
-        is_teleport = self.current_map.get("teleport", False)
+        dx, dy = {"N": (0, -1), "S": (0, 1), "E": (1, 0), "W": (-1, 0)}.get(
+            direction, (0, 0)
+        )
 
+        width, height = self.current_map["width"], self.current_map["height"]
+        # Use width for E/W and height for N/S to correctly bound the ray
+        max_dist = width if dx != 0 else height
+
+        path = []
+        nx, ny = x + dx, y + dy
+        hit_wumpus = False
+        last_valid_pos = None
+
+        # Raycast for the arrow
+        for _ in range(max_dist):
+            nx, ny = self._wrap_coords(nx, ny)
+            if not (0 <= nx < width and 0 <= ny < height):
+                break
+
+            cell = self.current_map["grid"][ny][nx]
+            if cell == "obstacle":
+                break
+
+            path.append([nx, ny])
+            last_valid_pos = (nx, ny)
+
+            if cell == "wumpus" and self.sim_state["wumpus_alive"]:
+                self.sim_state["wumpus_alive"] = False
+                self.sim_state["scream"] = True
+                hit_wumpus = True
+                logging.info("Scream! The Wumpus was killed!")
+                break
+
+            nx += dx
+            ny += dy
+
+        # Set to None if empty to prevent frontend crashes
+        self.sim_state["last_arrow_path"] = path if path else None
+
+        # If it didn't hit anything, it lands on the ground (only if floor)
+        if (not hit_wumpus) and last_valid_pos:
+            lx, ly = last_valid_pos
+            cell_at_landing = self.current_map["grid"][ly][lx]
+            if cell_at_landing == "floor":
+                self.current_map["grid"][ly][lx] = "arrow"
+                logging.info(f"Arrow landed on the ground at {lx}, {ly}")
+            elif cell_at_landing == "pit":
+                logging.info(f"Arrow fell into a pit at {lx}, {ly} and is lost.")
+            else:
+                logging.info(f"Arrow hit {cell_at_landing} and broke.")
+
+    def get_percepts(self) -> Dict[str, bool]:
+        """Calculates current percepts for the agent."""
+        if not self.current_map:
+            return {}
+
+        x, y = self.sim_state["agent_pos"]
+        grid = self.current_map["grid"]
         percepts = {
             "stench": False,
             "breeze": False,
-            "glitter": False,
+            "glitter": grid[y][x] == "gold",
             "bump": self.sim_state.get("bumped", False),
-            "scream": False,
+            "scream": self.sim_state.get("scream", False),
         }
 
-        # Check current tile
-        if grid[y][x] == "gold":
-            percepts["glitter"] = True
-
-        # Determine valid neighbors (accounting for teleportation rules)
-        neighbors = [(x, y - 1), (x, y + 1), (x - 1, y), (x + 1, y)]
-        valid_neighbors = []
-        for nx, ny in neighbors:
-            if is_teleport:
-                valid_neighbors.append((nx % width, ny % height))
-            elif 0 <= nx < width and 0 <= ny < height:
-                valid_neighbors.append((nx, ny))
-
-        # Check adjacent tiles
-        for nx, ny in valid_neighbors:
-            if grid[ny][nx] == "pit":
-                percepts["breeze"] = True
-            elif grid[ny][nx] == "wumpus":
-                percepts["stench"] = True
+        for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+            nx, ny = self._wrap_coords(x + dx, y + dy)
+            if (
+                0 <= nx < self.current_map["width"]
+                and 0 <= ny < self.current_map["height"]
+            ):
+                cell = grid[ny][nx]
+                if cell == "pit":
+                    percepts["breeze"] = True
+                if cell == "wumpus" and self.sim_state["wumpus_alive"]:
+                    percepts["stench"] = True
 
         return percepts
 
-    def reset_sim(self):
-        """Resets the map state, heatmaps, and status flags."""
+    def reset_sim(self) -> None:
+        """Resets the simulation to the initial state."""
         if self.current_map:
             start_pos = self.current_map.get("start", [0, 0])
-            self.sim_state = {
-                "agent_pos": start_pos,
-                "visits": {f"{start_pos[0]},{start_pos[1]}": 1},
-                "hits": {},
-                "bumped": False,
-            }
-            self.running = False
-            logging.info("Simulation reset to start state.")
+            self._initialize_empty_state()
+            self.sim_state["agent_pos"] = start_pos
+            self.sim_state["visits"] = {f"{start_pos[0]},{start_pos[1]}": 1}
+            self.running = True
+            logging.info("Simulation reset and started.")
 
-    def check_objective(self):
-        """Wumpus World specific win/loss conditions."""
+    def check_objective(self) -> None:
+        """Checks if the agent has reached an objective or died."""
+        if not self.current_map:
+            return
+
         x, y = self.sim_state["agent_pos"]
-        current_cell = self.current_map["grid"][y][x]
+        cell = self.current_map["grid"][y][x]
 
-        if current_cell == "wumpus":
-            self.running = False
-            logging.info("GAME OVER: Eaten by the Wumpus!")
-        elif current_cell == "pit":
-            self.running = False
-            logging.info("GAME OVER: Fell into a pit!")
-        elif current_cell == "gold":
-            self.running = False
-            logging.info("VICTORY: Found the Gold!")
+        if cell == "wumpus" and self.sim_state["wumpus_alive"]:
+            self._end_game("GAME OVER: Wumpus!", -1000)
+        elif cell == "pit":
+            self._end_game("GAME OVER: Pit!", -1000)
+        elif cell == "gold":
+            self._end_game("VICTORY: Gold!", 1000)
 
-    async def send_agent_state(self):
-        """Sends ONLY percepts and basic state to the agent to enforce partial observability."""
-        if self.agent_ws:
-            payload = {
-                "type": "state",
-                "position": self.sim_state["agent_pos"],
-                "objective_reached": not self.running,
-                "width": self.current_map.get("width"),
-                "height": self.current_map.get("height"),
-                "start": self.current_map.get("start"),
-                "percepts": self.get_percepts(),  # The core of the Wumpus logic
-            }
-            await self.agent_ws.send(json.dumps(payload))
+    def _end_game(self, message: str, score_mod: int) -> None:
+        """Ends the game with a message and score modifier."""
+        self.running = False
+        self.sim_state["game_over"] = True
+        self.sim_state["score"] += score_mod
+        logging.info(message)
 
-    async def update_frontend(self):
+    async def send_agent_state(self) -> None:
+        """Sends current state to the agent."""
+        if not self.agent_ws:
+            return
+        payload = {
+            "type": "state",
+            "position": self.sim_state["agent_pos"],
+            "objective_reached": self.sim_state["game_over"],
+            "width": self.current_map.get("width", 0) if self.current_map else 0,
+            "height": self.current_map.get("height", 0) if self.current_map else 0,
+            "start": (
+                self.current_map.get("start", [0, 0])
+                if self.current_map
+                else [0, 0]
+            ),
+            "percepts": self.get_percepts(),
+            "score": self.sim_state["score"],
+            "arrows": self.sim_state["arrows"],
+        }
+        await self.agent_ws.send(json.dumps(payload))
+
+    async def update_frontend(self) -> None:
+        """Sends current state to the frontend."""
         if self.frontend_ws:
-            payload = {
-                "type": "update",
-                "map": self.current_map,
-                "state": self.sim_state,
-                "running": self.running,
-                "agent_connected": self.agent_ws is not None,
-            }
-            await self.frontend_ws.send(json.dumps(payload))
-
-    async def send_map_list(self):
-        if self.frontend_ws:
-            try:
-                maps = sorted(
-                    [f for f in os.listdir(self.maps_dir) if f.endswith(".json")]
+            await self.frontend_ws.send(
+                json.dumps(
+                    {
+                        "type": "update",
+                        "map": self.current_map,
+                        "state": self.sim_state,
+                        "running": self.running,
+                        "agent_connected": self.agent_ws is not None,
+                    }
                 )
-                await self.frontend_ws.send(
-                    json.dumps({"type": "map_list", "maps": maps})
-                )
-            except Exception as e:
-                logging.error(f"Failed to read maps directory: {e}")
-
-    def load_map(self, filename):
-        try:
-            filepath = os.path.join(self.maps_dir, filename)
-            with open(filepath, "r") as f:
-                self.current_map = json.load(f)
-
-            self.reset_sim()
-            logging.info(f"Successfully loaded map: {filename}")
-        except Exception as e:
-            logging.error(f"Failed to load map {filename}: {e}")
-
-    def save_map(self, filename, map_data):
-        try:
-            if not filename.endswith(".json"):
-                filename += ".json"
-            filepath = os.path.join(self.maps_dir, filename)
-
-            with open(filepath, "w") as f:
-                json.dump(map_data, f)
-            logging.info(f"Successfully saved map: {filepath}")
-        except PermissionError:
-            logging.error(
-                f"Permission denied when saving {filename}. Check Docker volume permissions."
             )
+
+    async def send_map_list(self) -> None:
+        """Sends the list of available maps to the frontend."""
+        if self.frontend_ws:
+            maps = sorted(
+                [f for f in os.listdir(self.maps_dir) if f.endswith(".json")]
+            )
+            await self.frontend_ws.send(json.dumps({"type": "map_list", "maps": maps}))
+
+    def validate_map(self, map_data: Dict[str, Any]) -> Tuple[bool, str]:
+        """Simple validation of map structure."""
+        if not isinstance(map_data, dict):
+            return False, "Map data must be a dictionary"
+
+        required_fields = ["width", "height", "grid", "start"]
+        for field in required_fields:
+            if field not in map_data:
+                return False, f"Missing required field: {field}"
+
+        width = map_data["width"]
+        height = map_data["height"]
+        grid = map_data["grid"]
+
+        if not isinstance(grid, list) or len(grid) != height:
+            return False, "Invalid grid height."
+
+        for row in grid:
+            if not isinstance(row, list) or len(row) != width:
+                return False, "Invalid grid width."
+
+        start = map_data["start"]
+        if not isinstance(start, list) or len(start) != 2:
+            return False, "Invalid start position format"
+        if not (0 <= start[0] < width and 0 <= start[1] < height):
+            return False, "Start position out of bounds"
+
+        return True, ""
+
+    def load_map(self, filename: str) -> None:
+        """Loads a map from a file."""
+        try:
+            safe_filename = os.path.basename(filename)
+            filepath = os.path.join(self.maps_dir, safe_filename)
+            with open(filepath, "r") as f:
+                data = json.load(f)
+            valid, msg = self.validate_map(data)
+            if valid:
+                self.current_map = data
+                self.reset_sim()
+            else:
+                logging.error(f"Invalid map {safe_filename}: {msg}")
         except Exception as e:
-            logging.error(f"Unexpected error saving map {filename}: {e}")
+            logging.error(f"Load error: {e}")
+
+    def save_map(self, filename: str, map_data: Dict[str, Any]) -> None:
+        """Saves a map to a file."""
+        try:
+            valid, msg = self.validate_map(map_data)
+            if not valid:
+                logging.error(f"Save error: {msg}")
+                return
+            safe_filename = os.path.basename(filename)
+            if not safe_filename.endswith(".json"):
+                safe_filename += ".json"
+            with open(os.path.join(self.maps_dir, safe_filename), "w") as f:
+                json.dump(map_data, f)
+            logging.info(f"Saved: {safe_filename}")
+        except Exception as e:
+            logging.error(f"Save error: {e}")
 
 
 if __name__ == "__main__":
