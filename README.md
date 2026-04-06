@@ -1,4 +1,4 @@
-# img src="frontend/favicon.svg" alt="logo" width="128" height="128" align="middle"> SI2 - Wumpus World Simulator
+# <img src="frontend/favicon.svg" alt="logo" width="128" height="128" align="middle"> SI2 - Wumpus World Simulator
 
 A modular Wumpus World simulation platform with a Python-based WebSocket backend, an HTML/JS frontend for visualization, and an extensible agent system.
 
