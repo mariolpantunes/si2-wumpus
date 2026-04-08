@@ -1,84 +1,100 @@
-# <img src="frontend/favicon.svg" alt="logo" width="128" height="128" align="middle"> SI2 - Wumpus World Simulator
+# <img src="frontend/favicon.svg" alt="logo" width="128" height="128" align="middle"> SI2 - Wumpus
 
-A modular Wumpus World simulation platform with a Python-based WebSocket backend, an HTML/JS frontend for visualization, and an extensible agent system.
+SI2-Wumpus is a modular simulation environment for the classic Wumpus World game, designed for testing and developing autonomous agents. The project features a Python-based WebSocket backend that handles the simulation engine, an HTML5 Canvas-based frontend for real-time visualization, and an extensible agent system that allows for easy implementation of custom AI strategies.
 
-## Features
+The primary objective of the game depends on the map type: in `wumpus` mode, the agent must find and collect the gold; in `maze` mode, it must reach a specific target; and in `room` mode, it must explore all reachable floor tiles. Agents can move in four cardinal directions (North, South, East, West) and can shoot arrows to kill the Wumpus, while avoiding deadly pits and the Wumpus itself.
 
-- **Partial Observability**: Agents only receive percepts (`stench`, `breeze`, `glitter`, `bump`, `scream`) and their current position.
-- **Visualizer**: Real-time ground truth and agent-perspective visualization using HTML5 Canvas.
-- **Map Editor**: Built-in editor to create, save, and load custom Wumpus World maps.
-- **Modular Agents**: Easy-to-extend `BaseAgent` class for implementing custom AI agents.
-- **Advanced Mechanics**: Supports toroidal (wrapping) maps, arrow pickups, and pickable arrows on misses.
+## Game Rules
 
-## Installation
+The simulation follows the standard Wumpus World logic with additional features:
+- **Percepts**: At each step, the agent receives a set of percepts:
+  - `stench`: The Wumpus is in an adjacent cell.
+  - `breeze`: A pit is in an adjacent cell.
+  - `glitter`: Gold is in the current cell.
+  - `bump`: The agent walked into an obstacle or the edge of the map.
+  - `scream`: The Wumpus was killed by an arrow.
+- **Actions**: The agent can perform the following actions:
+  - `move`: Move one cell in a direction ('N', 'S', 'E', 'W').
+  - `shoot`: Fire an arrow in a direction ('N', 'S', 'E', 'W').
+- **World State**: The world is a grid of cells which can contain floors, obstacles, pits, the Wumpus, or gold. If teleportation is enabled, the grid is toroidal (wrapping around edges).
+- **Scoring**:
+  - -1 for each move.
+  - -10 for shooting an arrow.
+  - -1000 for dying (falling in a pit or being eaten by the Wumpus).
+  - +1000 for achieving the objective (finding gold, reaching target, or exploring the room).
 
-1.  **Clone the repository**:
-    ```bash
-    git clone https://github.com/yourusername/si2-wumpus.git
-    cd si2-wumpus
-    ```
+## Setup
 
-2.  **Create a virtual environment and install dependencies**:
-    ```bash
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt
-    ```
+The simulation can be launched using Docker Compose for the full stack, or manually using a Python virtual environment for the agents.
 
-## Usage
-
-### 1. Start the Backend
-The server manages the game state and coordinates communication between the frontend and the agent.
+### 1. Launch the Simulation Stack
+Use Docker Compose to start the backend and the frontend viewer:
 ```bash
-python3 backend/server.py
+docker compose up
+```
+The frontend will be available at `http://localhost:8080` (or the port specified in `compose.yml`).
+
+### 2. Prepare the Agent Environment
+Create a virtual environment and install the required dependencies:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+pip install pyright ruff
 ```
 
-### 2. Open the Frontend
-Open `frontend/index.html` in any modern web browser.
-- Use the **Run Map** menu to load an existing map from the `maps/` directory.
-- Use the **Edit Map** menu to create and save new maps.
+### 3. Execute Agents
+Agents are executed locally and connect to the backend via WebSockets:
+```bash
+# To run the manual control agent:
+python agents/manual_agent.py
 
-### 3. Run an Agent
-Connect an agent to the running simulation.
-
-- **Manual Control**:
-  ```bash
-  python3 agents/manual_agent.py
-  ```
-  Control the agent using `W/A/S/D` for movement and `I/J/K/L` for shooting.
-
-- **Random (Dummy) Agent**:
-  ```bash
-  python3 agents/dummy_agent.py
-  ```
+# To run the dummy (random) agent:
+python agents/dummy_agent.py
+```
 
 ## Project Structure
 
-- `backend/server.py`: The core simulation logic and WebSocket server.
-- `frontend/`: HTML, CSS, and JavaScript for the web-based UI.
-- `agents/`:
-    - `base_agent.py`: Abstract base class handling WebSocket communication.
-    - `manual_agent.py`: Keyboard-controlled agent.
-    - `dummy_agent.py`: Randomly acting agent.
-- `maps/`: JSON files defining Wumpus World environments.
+- `backend/`: Python server using `websockets`.
+  - `server.py`: Main simulation engine. Handles map loading, agent movement, and state broadcasting.
+- `frontend/`: HTML5 Canvas-based visualization and map editor.
+  - `index.html`: UI structure.
+  - `script.js`: Frontend logic, WebSocket client, and Canvas rendering.
+  - `styles.css`: UI styling.
+- `agents/`: Autonomous agents that connect to the backend.
+  - `base_agent.py`: Abstract base class for all agents.
+  - `dummy_agent.py`: A simple random agent implementation.
+  - `manual_agent.py`: Manual terminal-based control agent.
+- `maps/`: JSON files defining maze and room layouts.
+- `compose.yml`: Docker Compose configuration for running the full stack.
 
 ## Development
 
-### Adding a New Agent
-To create a new agent, subclass `BaseAgent` and implement the `deliberate()` method:
+To develop a new agent, you should subclass the `BaseAgent` and implement the `deliberate` method. For more details on the available state and structure, refer to the [Project Structure](#project-structure) section.
 
 ```python
+from typing import Optional, Union, Tuple
 from agents.base_agent import BaseAgent
 
 class MyAgent(BaseAgent):
-    async def deliberate(self):
-        # Access percepts via self.current_state['percepts']
-        # Return 'N', 'S', 'E', 'W', or ('shoot', direction)
-        return 'N'
+    """Custom agent implementation."""
+
+    async def deliberate(self) -> Optional[Union[str, Tuple[str, str]]]:
+        """
+        Logic for deciding the next action.
+        Returns 'N', 'S', 'E', 'W' for movement, 
+        or ('shoot', direction) for shooting.
+        """
+        percepts = self.current_state.get("percepts", {})
+        if percepts.get("glitter"):
+            return None # Stop if we found the gold
+        
+        return "N" # Move North by default
 ```
+
 ## Authors
 
-  * **Mário Antunes** - [mariolpantunes](https://github.com/mariolpantunes)
+* **Mário Antunes** - [mariolpantunes](https://github.com/mariolpantunes)
 
 ## License
 

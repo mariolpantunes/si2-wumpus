@@ -4,17 +4,17 @@
       <stop offset="0%" stop-color="#5E81AC" />
       <stop offset="100%" stop-color="#3B4252" />
     </radialGradient>
-    
+
     <radialGradient id="wumpusGrad" cx="30%" cy="30%" r="70%">
       <stop offset="0%" stop-color="#A3BE8C" />
       <stop offset="100%" stop-color="#434C5E" />
     </radialGradient>
-    
+
     <radialGradient id="goldGrad" cx="30%" cy="30%" r="70%">
       <stop offset="0%" stop-color="#EBCB8B" />
       <stop offset="100%" stop-color="#D08770" />
     </radialGradient>
-    
+
     <radialGradient id="playerGrad" cx="30%" cy="30%" r="70%">
       <stop offset="0%" stop-color="#88C0D0" />
       <stop offset="100%" stop-color="#5E81AC" />

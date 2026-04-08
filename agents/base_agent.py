@@ -5,14 +5,13 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import websockets
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - AGENT - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - AGENT - %(levelname)s - %(message)s")
 
 
 class BaseAgent:
     """
     Abstract base class for Wumpus World agents.
+
     Handles all websocket communications and state updates.
     Subclasses MUST implement the deliberate() method.
     """
@@ -24,7 +23,7 @@ class BaseAgent:
         Args:
             server_uri: The URI of the simulation server.
         """
-        self.server_uri = server_uri
+        self.server_uri: str = server_uri
         self.current_state: Optional[Dict[str, Any]] = None
         self.idle_logged: bool = False
 
@@ -36,6 +35,8 @@ class BaseAgent:
                 logging.info(f"Connected to {self.server_uri}")
 
                 async for message in websocket:
+                    if isinstance(message, bytes):
+                        message = message.decode("utf-8")
                     data = json.loads(message)
 
                     if data.get("type") == "state":
@@ -60,6 +61,9 @@ class BaseAgent:
                         self.update_memory()
                         await self.send_telemetry(websocket)
 
+                        if not self.current_state.get("running"):
+                            continue
+
                         # Ask the subclass for the next move based purely on percepts
                         action_data = await self.deliberate()
 
@@ -70,17 +74,9 @@ class BaseAgent:
 
                             if isinstance(action_data, tuple):
                                 action, direction = action_data
-                                await websocket.send(
-                                    json.dumps(
-                                        {"action": action, "direction": direction}
-                                    )
-                                )
+                                await websocket.send(json.dumps({"action": action, "direction": direction}))
                             else:
-                                await websocket.send(
-                                    json.dumps(
-                                        {"action": "move", "direction": action_data}
-                                    )
-                                )
+                                await websocket.send(json.dumps({"action": "move", "direction": action_data}))
                             await asyncio.sleep(0.15)
 
                     elif data.get("type") == "reset":
@@ -96,7 +92,11 @@ class BaseAgent:
     async def deliberate(self) -> Optional[Union[str, Tuple[str, str]]]:
         """
         The core decision loop.
+
         MUST return one of: 'N', 'S', 'E', 'W', ('shoot', direction) or None.
+
+        Returns:
+            The chosen action and direction, or None.
         """
         raise NotImplementedError("Subclasses must implement deliberate()")
 

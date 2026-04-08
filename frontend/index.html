@@ -38,7 +38,18 @@
                 <h2>Create Map</h2>
                 <input type="text" id="new-map-name" placeholder="Map Name" />
 
-                <input type="hidden" id="new-map-type" value="wumpus" />
+                <div style="display: flex; flex-direction: column; gap: 5px">
+                    <label
+                        for="new-map-type"
+                        style="font-size: 12px; color: var(--nord4)"
+                        >Game Mode:</label
+                    >
+                    <select id="new-map-type">
+                        <option value="wumpus">Wumpus (Gold)</option>
+                        <option value="maze">Maze (Target)</option>
+                        <option value="room">Room (Explore)</option>
+                    </select>
+                </div>
 
                 <div style="display: flex; align-items: center; gap: 10px">
                     <input

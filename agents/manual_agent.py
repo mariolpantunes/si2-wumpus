@@ -10,7 +10,12 @@ from agents.base_agent import BaseAgent
 
 
 def getch() -> str:
-    """Reads a single character from the standard input (Linux/macOS)."""
+    """
+    Reads a single character from the standard input (Linux/macOS).
+
+    Returns:
+        The character read from stdin.
+    """
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     try:
@@ -24,6 +29,7 @@ def getch() -> str:
 class ManualAgent(BaseAgent):
     """
     An agent controlled manually via the terminal using W, A, S, D keys instantly.
+
     Adapted for Wumpus World partial observability.
     """
 
@@ -49,7 +55,12 @@ class ManualAgent(BaseAgent):
                 self.visited.add(f"{pos[0]},{pos[1]}")
 
     async def deliberate(self) -> Optional[Union[str, Tuple[str, str]]]:
-        """Prompts the user for a valid input."""
+        """
+        Prompts the user for a valid input.
+
+        Returns:
+            The chosen move or shoot action.
+        """
         if not self.current_state:
             return None
 
@@ -91,13 +102,19 @@ class ManualAgent(BaseAgent):
         self.visited.clear()
 
     async def send_telemetry(self, websocket: Any) -> None:
-        """Pass the current percepts to the UI to update the tags panel."""
+        """
+        Pass the current percepts to the UI to update the tags panel.
+
+        Args:
+            websocket: The websocket connection to the server.
+        """
         percepts = self.current_state.get("percepts", {}) if self.current_state else {}
         payload = {
             "action": "telemetry",
             "data": {
                 "visited": list(self.visited),
                 "percepts": percepts,
+                "agent_pos": self.current_state.get("position") if self.current_state else None,
                 "current_probs": {"N": 0.0, "S": 0.0, "E": 0.0, "W": 0.0},
             },
         }
